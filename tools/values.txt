@@ -1,0 +1,20 @@
+values:
+data, nparrary
+
+cluster_vertex, (js,cl), [idx,...]
+
+cluster_id_by_key, (js,cl), id
+
+cluster_key_by_id, id, (js,cl)
+
+cluster_planeparas, (js,cl), [A,B,C,D]
+
+dip_dict, (js,cl), [dips[i], strikes[i], a[i], b[i], c[i]]
+
+trace_dict, (js, cl), {
+						'length': max_len,
+						'start': coord_start.tolist(),
+						'end': coord_end.tolist(),
+						'start_idx': int(idx_start),
+						'end_idx': int(idx_end)
+					}
