@@ -58,7 +58,7 @@ import os
 # ========================
 # CM = 0.01  # 1 cm   # 每个采样点间距 1 cm（即点云分辨率 0.01 m）
 CM = 0.05
-DEFAULT_EXPORT_DIR = "./exports"
+DEFAULT_EXPORT_DIR = r"E:\Database\_RockPoints\PlanesInCube"
 LOG_LEVEL = logging.INFO
 
 logging.basicConfig(
@@ -554,81 +554,31 @@ def QuickShow3D(pts: np.ndarray, lbl: Optional[np.ndarray] = None, max_show: int
 # ========================
 if __name__ == "__main__":
     gen = PlanePointCloudGenerator(cube_size=10.0, seed=42)
-
-    # # ===== 例1: 单面 + 噪声/弯曲/两类流形形变 =====
-    # pts1, lbl1, meta1 = gen.Build(
-    #     plane_count=1,
-    #     step=CM,
-    #     bend_kappa=0.6,  # 0-1 弯曲度
-    #     bend_amp=0.2,
-    #     grid_amp=0.05,
-    #     wave_amp=0.05,
-    #     grid_n=5,  # Grid: 2/5/10
-    #     apply_grid_warp=True,  # 流形 I
-    #     apply_wave_warp=True,  # 流形 II
-    #     noise_level=0.3  # 10%-50% 高斯噪声 -> 0.3 代表 30%
-    # )
-    # SaveAsPLY(os.path.join(DEFAULT_EXPORT_DIR, "case1_single_plane.ply"), pts1, lbl1)
-    # # QuickShow3D(pts1, lbl1)
-
-    # # ===== 例2: 双面 (夹角与面积占比) + 形变 =====
-    # pts2, lbl2, meta2 = gen.Build(
-    #     plane_count=2,
-    #     angle_deg=60,  # 夹角: 10..170
-    #     area_ratio=(3, 7),  # 面积占比: 1:9..5:5
-    #     step=CM,
-    #     bend_kappa=0.2,
-    #     grid_n=10,
-    #     apply_grid_warp=True,
-    #     apply_wave_warp=False,
-    #     noise_level=0.2
-    # )
-    # SaveAsXYZ(os.path.join(DEFAULT_EXPORT_DIR, "case2_two_planes.xyz"), pts2, lbl2)
-    # # QuickShow3D(pts2, lbl2)
-
-    # # ===== 例3: 三面 (三棱锥近似) + 形变 =====
-    # pts3, lbl3, meta3 = gen.Build(
-    #     plane_count=3,
-    #     angle_deg=40,  # 解释为“顶角之和”的代理(【未经验证】映射)
-    #     area_ratio=(2.0, 4.0, 4.0),  # 面积占比集合之一
-    #     step=CM,
-    #     bend_kappa=0.4,
-    #     grid_n=2,
-    #     apply_grid_warp=False,
-    #     apply_wave_warp=True,
-    #     noise_level=0.1
-    # )
-    # SaveAsPLY(os.path.join(DEFAULT_EXPORT_DIR, "case3_three_planes.ply"), pts3, lbl3)
-    # # QuickShow3D(pts3, lbl3)
-    #
-    # logger.info("全部示例生成完成。")
-
     # ========================
-    # 批量生成：plane_count = 1
+    # 批量生成：plane_count = 2
+    # 命名: Plane2_Ang{ang}_Ara{a}-{b}_Gno{gno}_Ben{ben}_Grid{grid}_Sin{sinp}.ply
     # ========================
-
-    # --- 可调基准幅值，与单次示例保持一致 ---
     bend_amp_base = 0.2
     grid_amp_base = 0.05
     wave_amp_base = 0.05
 
-    # --- 批量参数 ---
-    noise_percent_list = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]  # 高斯噪声百分比
-    bend_percent_list = list(range(0, 101, 10))  # 弯曲度百分比 0..100
-    grid_n_list = list(range(2, 11))  # 2..10
-    wave_percent_list = list(range(0, 101, 10))  # 正弦起伏百分比 0..100
+    angle_list = [20, 40, 60, 80, 100, 120, 140, 160]  # 两平面夹角(度)
+    area_ratio_list = [(1, 9), (2, 8), (3, 7), (4, 6), (5, 5)]  # 面积占比
+    noise_percent_list = [0, 20, 40, 60, 80, 100]  # 高斯噪声 %
+    bend_percent_list = [0, 20, 40, 60, 80, 100]  # 弯曲度 %
+    grid_n_list = [2, 4, 6, 8, 10]  # Grid: 2x2,4x4,...
+    wave_percent_list = [0, 20, 40, 60, 80, 100]  # 正弦起伏 %
 
-    # --- 导出目录与清单 ---
-    batch_dir = os.path.join(DEFAULT_EXPORT_DIR, "batch_plane1")
-    os.makedirs(batch_dir, exist_ok=True)
-    manifest_path = os.path.join(batch_dir, "manifest_plane1.csv")
+    batch_dir2 = os.path.join(DEFAULT_EXPORT_DIR, "batch_plane2")
+    os.makedirs(batch_dir2, exist_ok=True)
+    manifest2_path = os.path.join(batch_dir2, "manifest_plane2.csv")
 
-    # 若清单不存在则写表头；存在则追加
-    write_header = not os.path.exists(manifest_path)
-    with open(manifest_path, "a", newline="", encoding="utf-8") as f_csv:
-        writer = csv.writer(f_csv)
-        if write_header:
-            writer.writerow([
+    # 写表头(若不存在)
+    write_header2 = not os.path.exists(manifest2_path)
+    with open(manifest2_path, "a", newline="", encoding="utf-8") as f2:
+        writer2 = csv.writer(f2)
+        if write_header2:
+            writer2.writerow([
                 "filename",
                 "plane_count",
                 "angle_deg",
@@ -640,64 +590,85 @@ if __name__ == "__main__":
                 "bend_amp",
                 "grid_amp",
                 "wave_amp_abs",
-                "n_points"
+                "n_points",
+                # 两个真值平面方程 (ax+by+cz+d=0)
+                "A1", "B1", "C1", "D1",
+                "A2", "B2", "C2", "D2",
             ])
 
-        total_count = 0
-        skipped = 0
+        total_count2 = 0
+        skipped2 = 0
 
-        for gno in noise_percent_list:
-            noise_level = gno / 100.0  # 与 Build 中 noise_level 语义一致(相对 1cm)
-            for ben in bend_percent_list:
-                bend_kappa = ben / 100.0
-                for grid_n in grid_n_list:
-                    for sinp in wave_percent_list:
-                        # 文件名(按你的格式)：Plane1_Ang0_Ara0_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply
-                        fname = f"Plane1_Ang0_Ara0_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply"
-                        fpath = os.path.join(batch_dir, fname)
+        for ang in angle_list:
+            for (a_part, b_part) in area_ratio_list:
+                ar_str = f"{a_part}:{b_part}"
+                for gno in noise_percent_list:
+                    noise_level = gno / 100.0
+                    for ben in bend_percent_list:
+                        bend_kappa = ben / 100.0
+                        for grid_n in grid_n_list:
+                            for sinp in wave_percent_list:
+                                wave_amp = (sinp / 100.0) * wave_amp_base
+                                apply_wave = (sinp > 0)
 
-                        # 跳过已存在文件(便于断点续跑)
-                        if os.path.exists(fpath):
-                            skipped += 1
-                            continue
+                                fname = f"Plane2_Ang{ang}_Ara{a_part}-{b_part}_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply"
+                                fpath = os.path.join(batch_dir2, fname)
 
-                        # 波形幅值：百分比×基准；0% 时关闭波形形变
-                        wave_amp = (sinp / 100.0) * wave_amp_base
-                        apply_wave = (sinp > 0)
+                                if os.path.exists(fpath):
+                                    skipped2 += 1
+                                    continue
 
-                        # 构建
-                        pts, lbl, meta = gen.Build(
-                            plane_count=1,
-                            step=CM,
-                            bend_kappa=bend_kappa,
-                            bend_amp=bend_amp_base,
-                            grid_amp=grid_amp_base,
-                            wave_amp=wave_amp,
-                            grid_n=grid_n,
-                            apply_grid_warp=True,
-                            apply_wave_warp=apply_wave,
-                            noise_level=noise_level
-                        )
+                                # 构建两平面数据
+                                pts, lbl, meta = gen.Build(
+                                    plane_count=2,
+                                    angle_deg=ang,
+                                    area_ratio=(a_part, b_part),
+                                    step=CM,
+                                    bend_kappa=bend_kappa,
+                                    bend_amp=bend_amp_base,
+                                    grid_amp=grid_amp_base,
+                                    wave_amp=wave_amp,
+                                    grid_n=grid_n,
+                                    apply_grid_warp=True,
+                                    apply_wave_warp=apply_wave,
+                                    noise_level=noise_level
+                                )
 
-                        # 保存
-                        SaveAsPLY(fpath, pts, lbl)
+                                # 保存
+                                SaveAsPLY(fpath, pts, lbl)
 
-                        # 写清单
-                        writer.writerow([
-                            fname,
-                            1,  # plane_count
-                            0,  # angle_deg 占位
-                            "0",  # area_ratio 占位
-                            gno,  # noise_percent
-                            ben,  # bend_percent
-                            grid_n,  # grid_n
-                            sinp,  # wave_percent
-                            bend_amp_base,
-                            grid_amp_base,
-                            wave_amp,  # 实际波形绝对幅值
-                            meta.get("n_points", pts.shape[0])
-                        ])
+                                # 读取两条真值平面方程
+                                if "gt_planes" in meta and len(meta["gt_planes"]) >= 2:
+                                    A1 = meta["gt_planes"][0]["a"];
+                                    B1 = meta["gt_planes"][0]["b"];
+                                    C1 = meta["gt_planes"][0]["c"];
+                                    D1 = meta["gt_planes"][0]["d"]
+                                    A2 = meta["gt_planes"][1]["a"];
+                                    B2 = meta["gt_planes"][1]["b"];
+                                    C2 = meta["gt_planes"][1]["c"];
+                                    D2 = meta["gt_planes"][1]["d"]
+                                else:
+                                    A1 = B1 = C1 = D1 = A2 = B2 = C2 = D2 = (float("nan"))
 
-                        total_count += 1
+                                # 写清单
+                                writer2.writerow([
+                                    fname,
+                                    2,  # plane_count
+                                    ang,  # angle_deg
+                                    ar_str,  # area_ratio "a:b"
+                                    gno,  # noise_percent
+                                    ben,  # bend_percent
+                                    grid_n,  # grid_n
+                                    sinp,  # wave_percent
+                                    bend_amp_base,
+                                    grid_amp_base,
+                                    wave_amp,  # 绝对幅值(米)
+                                    meta.get("n_points", pts.shape[0]),
+                                    A1, B1, C1, D1,
+                                    A2, B2, C2, D2
+                                ])
 
-        logger.info(f"[批量完成] 新生成: {total_count} 个文件, 跳过(已存在): {skipped} 个。清单: {manifest_path}")
+                                total_count2 += 1
+
+        logger.info(
+            f"[批量完成: plane2] 新生成: {total_count2} 个文件, 跳过(已存在): {skipped2} 个。清单: {manifest2_path}")

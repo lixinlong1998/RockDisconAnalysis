@@ -58,7 +58,7 @@ import os
 # ========================
 # CM = 0.01  # 1 cm   # 每个采样点间距 1 cm（即点云分辨率 0.01 m）
 CM = 0.05
-DEFAULT_EXPORT_DIR = "./exports"
+DEFAULT_EXPORT_DIR = r"E:\Database\_RockPoints\PlanesInCube"
 LOG_LEVEL = logging.INFO
 
 logging.basicConfig(
@@ -115,6 +115,18 @@ def RotateVectorAroundAxis(v: np.ndarray, axis: np.ndarray, angle_rad: float) ->
     c = np.cos(angle_rad)
     s = np.sin(angle_rad)
     return v * c + np.cross(axis, v) * s + axis * (np.dot(axis, v)) * (1 - c)
+
+
+def PlaneEquationFromPatch(patch: "PatchSpec") -> dict:
+    """
+    基于 PatchSpec 输出真值平面方程 ax + by + cz + d = 0
+    使用补丁中心为平面上一点，单位法向为 (a,b,c)
+    """
+    n = Normalize(patch.normal)
+    p0 = patch.center
+    a, b, c = float(n[0]), float(n[1]), float(n[2])
+    d = float(- (a * p0[0] + b * p0[1] + c * p0[2]))
+    return {"a": a, "b": b, "c": c, "d": d}
 
 
 # ========================
@@ -448,6 +460,13 @@ class PlanePointCloudGenerator:
         else:
             raise ValueError("plane_count 只能是 1/2/3")
 
+        # 记录每个补丁的真值平面方程（形变/噪声之前）
+        gt_planes = []
+        for i, p in enumerate(patches):
+            rec = PlaneEquationFromPatch(p)
+            rec["plane_id"] = int(i)
+            gt_planes.append(rec)
+
         # 2) 逐补丁采样+形变
         all_pts = []
         all_lbl = []
@@ -476,8 +495,10 @@ class PlanePointCloudGenerator:
             apply_grid_warp=apply_grid_warp,
             apply_wave_warp=apply_wave_warp,
             noise_level=noise_level,
-            n_points=int(points.shape[0])
+            n_points=int(points.shape[0]),
+            gt_planes=gt_planes,
         )
+
         logger.info(f"[完成] 生成点数: {points.shape[0]}")
         return points, labels, meta
 
@@ -640,7 +661,8 @@ if __name__ == "__main__":
                 "bend_amp",
                 "grid_amp",
                 "wave_amp_abs",
-                "n_points"
+                "n_points",
+                "A", "B", "C", "D"  # <<< 新增四列
             ])
 
         total_count = 0
@@ -683,6 +705,15 @@ if __name__ == "__main__":
                         SaveAsPLY(fpath, pts, lbl)
 
                         # 写清单
+                        # === 读取真值平面 (单面: 取 plane_id=0) ===
+                        if "gt_planes" in meta and len(meta["gt_planes"]) >= 1:
+                            A = meta["gt_planes"][0]["a"]
+                            B = meta["gt_planes"][0]["b"]
+                            C = meta["gt_planes"][0]["c"]
+                            D = meta["gt_planes"][0]["d"]
+                        else:
+                            A = B = C = D = float("nan")
+
                         writer.writerow([
                             fname,
                             1,  # plane_count
@@ -695,7 +726,8 @@ if __name__ == "__main__":
                             bend_amp_base,
                             grid_amp_base,
                             wave_amp,  # 实际波形绝对幅值
-                            meta.get("n_points", pts.shape[0])
+                            meta.get("n_points", pts.shape[0]),
+                            A, B, C, D  # <<< 新增四列
                         ])
 
                         total_count += 1

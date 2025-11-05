@@ -58,7 +58,7 @@ import os
 # ========================
 # CM = 0.01  # 1 cm   # 每个采样点间距 1 cm（即点云分辨率 0.01 m）
 CM = 0.05
-DEFAULT_EXPORT_DIR = "./exports"
+DEFAULT_EXPORT_DIR = r"E:\Database\_RockPoints\PlanesInCube"
 LOG_LEVEL = logging.INFO
 
 logging.basicConfig(
@@ -265,56 +265,63 @@ class PlanePatchBuilder:
         return [p1, p2]
 
     # ----- 三面(三棱锥侧面近似) -----
-    def BuildThreePlanes(self, angle_sum_deg: int, area_ratio: Tuple[float, float, float]) -> List[PatchSpec]:
-        # 【未经验证】角和 -> 顶点高度的经验映射
-        h_min, h_max = 0.1, 4.0
-        t = (180 - angle_sum_deg) / 170.0
-        h = h_min + (h_max - h_min) * np.clip(t, 0.0, 1.0)
+    def BuildThreePlanes(self, pair_angle_deg: int, area_ratio: Tuple[int, int, int]) -> List["PatchSpec"]:
+        """
+        构造三张平面，使得 A 与 B、A 与 C 的夹角等于 pair_angle_deg。
+        当 pair_angle_deg <= 120° 时，三者两两夹角都能等于该角（等边球面三角形条件）。
+        当 pair_angle_deg > 120° 时，严格三两相等不可实现：这里采用尽量分离的方案，
+        令 ∠(A,B)=∠(A,C)=pair_angle_deg，∠(B,C) 自动由几何约束给出(φ=π)，并记录在 meta 中。
 
-        # 基底取近似等边三角, 其中心在立方体中心下方/上方, 顶点在中心+z*h
-        base_edge = self.cube_size * 0.9
-        top = self.center + np.array([0.0, 0.0, h])
-        base_z = self.center[2] - h * 0.6
-        base_center = np.array([self.center[0], self.center[1], base_z])
+        注意：真值平面方程由外层 Build() 汇总到 meta["gt_planes"]。
+        """
+        # 以 A 的法向为 +Z 轴，按给定夹角 θ 构造 B、C
+        theta = np.deg2rad(pair_angle_deg)
+        c = float(np.cos(theta))
+        s = float(np.sin(theta))
 
-        # 三侧面法向: 令三条从顶点指向基底三边中心的向量决定侧面方向
-        # 先构造基底三角的三个顶点(在 z=base_z 平面)
-        R = base_edge / np.sqrt(3) / 2 * 2  # 近似外接半径
-        v0 = base_center + np.array([R, 0.0, 0.0])
-        v1 = base_center + np.array([-R / 2, R * np.sqrt(3) / 2, 0.0])
-        v2 = base_center + np.array([-R / 2, -R * np.sqrt(3) / 2, 0.0])
-        base_pts = [v0, v1, v2]
+        # A 指向 +Z
+        nA = np.array([0.0, 0.0, 1.0], dtype=float)
 
-        # 三边中点
-        e01 = (v0 + v1) / 2
-        e12 = (v1 + v2) / 2
-        e20 = (v2 + v0) / 2
-        edge_mids = [e01, e12, e20]
+        # 在 A 的局部坐标系中，单位向量的球坐标(极角=theta, 方位=phi)
+        # 选 B 的方位为 0
+        nB_local = np.array([s, 0.0, c], dtype=float)
 
-        normals = []
-        for m in edge_mids:
-            # 侧面大致法向 = 由顶点 top 指向边中点 m 的向量, 再与高度方向适配
-            n = np.cross(m - top, np.array([0, 0, 1.0]))
-            if np.linalg.norm(n) < 1e-9:
-                n = m - top
-            normals.append(Normalize(n))
+        # 希望 B、C 与 A 的夹角同为 theta，同时 B 与 C 的方位差 φ 需满足：
+        #   dot(B, C) = cos(theta) = sin^2(theta)*cosφ + cos^2(theta)
+        # => cosφ = cosθ/(1+cosθ) ，可行条件：cosθ >= -1/2 <=> theta <= 120°
+        feasible_equal = (c >= -0.5 - 1e-12)
+        if feasible_equal:
+            cos_phi = c / (1.0 + c + 1e-12)
+            cos_phi = np.clip(cos_phi, -1.0, 1.0)
+            phi = float(np.arccos(cos_phi))
+        else:
+            # 不可行区(>120°)：取 φ=π，使 B 与 C 在 A 的等倾角圆上尽量相对
+            phi = np.pi
 
-        # 面积占比 -> 三角面的边长缩放
-        a, b, c = area_ratio
-        s = np.array([a, b, c], dtype=float)
-        s = s / (s.max() + 1e-9)  # 以最大者为 1 缩放
-        edge_scales = 0.5 + 0.5 * s  # 将 [0,1] 映射至 [0.5,1.0]，避免过小
+        nC_local = np.array([s * np.cos(phi), s * np.sin(phi), c], dtype=float)
 
-        # 构造三侧面(等边三角近似), 用 edge_len 控制面积
-        edge_len_base = self.cube_size * 0.9
+        # 由于我们把 A 对齐 z 轴，"local==global"
+        nB = Normalize(nB_local)
+        nC = Normalize(nC_local)
+
+        normals = [nA, nB, nC]
+
+        # 面积占比 -> 三个矩形补丁面积
+        a1, a2, a3 = area_ratio
+        total_area = (self.cube_size * 0.7) ** 2   # 稍小于立方体，避免接近边界
+        ssum = float(a1 + a2 + a3)
+        areas = [total_area * a1 / ssum, total_area * a2 / ssum, total_area * a3 / ssum]
+
+        # 轻微偏移中心避免完全重叠（沿各自法向）
+        off = self.cube_size * 0.05
+        offsets = [off * np.array(normals[i]) for i in range(3)]
+
         patches = []
-        for i in range(3):
-            n = normals[i]
-            edge_len = float(edge_len_base * edge_scales[i])
-            # 把三角面的“中心”放在顶点与边中点的中线附近, 使三面共享近似顶点区域
-            center_offset = (edge_mids[i] + top) / 2 - self.center
-            patches.append(self._make_triangle_patch(n, edge_len, center_offset=center_offset))
+        for nrm, area, offv in zip(normals, areas, offsets):
+            patches.append(self._make_rect_patch(nrm, area, center_offset=offv))
+
         return patches
+
 
 
 # ========================
@@ -554,84 +561,36 @@ def QuickShow3D(pts: np.ndarray, lbl: Optional[np.ndarray] = None, max_show: int
 # ========================
 if __name__ == "__main__":
     gen = PlanePointCloudGenerator(cube_size=10.0, seed=42)
-
-    # # ===== 例1: 单面 + 噪声/弯曲/两类流形形变 =====
-    # pts1, lbl1, meta1 = gen.Build(
-    #     plane_count=1,
-    #     step=CM,
-    #     bend_kappa=0.6,  # 0-1 弯曲度
-    #     bend_amp=0.2,
-    #     grid_amp=0.05,
-    #     wave_amp=0.05,
-    #     grid_n=5,  # Grid: 2/5/10
-    #     apply_grid_warp=True,  # 流形 I
-    #     apply_wave_warp=True,  # 流形 II
-    #     noise_level=0.3  # 10%-50% 高斯噪声 -> 0.3 代表 30%
-    # )
-    # SaveAsPLY(os.path.join(DEFAULT_EXPORT_DIR, "case1_single_plane.ply"), pts1, lbl1)
-    # # QuickShow3D(pts1, lbl1)
-
-    # # ===== 例2: 双面 (夹角与面积占比) + 形变 =====
-    # pts2, lbl2, meta2 = gen.Build(
-    #     plane_count=2,
-    #     angle_deg=60,  # 夹角: 10..170
-    #     area_ratio=(3, 7),  # 面积占比: 1:9..5:5
-    #     step=CM,
-    #     bend_kappa=0.2,
-    #     grid_n=10,
-    #     apply_grid_warp=True,
-    #     apply_wave_warp=False,
-    #     noise_level=0.2
-    # )
-    # SaveAsXYZ(os.path.join(DEFAULT_EXPORT_DIR, "case2_two_planes.xyz"), pts2, lbl2)
-    # # QuickShow3D(pts2, lbl2)
-
-    # # ===== 例3: 三面 (三棱锥近似) + 形变 =====
-    # pts3, lbl3, meta3 = gen.Build(
-    #     plane_count=3,
-    #     angle_deg=40,  # 解释为“顶角之和”的代理(【未经验证】映射)
-    #     area_ratio=(2.0, 4.0, 4.0),  # 面积占比集合之一
-    #     step=CM,
-    #     bend_kappa=0.4,
-    #     grid_n=2,
-    #     apply_grid_warp=False,
-    #     apply_wave_warp=True,
-    #     noise_level=0.1
-    # )
-    # SaveAsPLY(os.path.join(DEFAULT_EXPORT_DIR, "case3_three_planes.ply"), pts3, lbl3)
-    # # QuickShow3D(pts3, lbl3)
-    #
-    # logger.info("全部示例生成完成。")
-
     # ========================
-    # 批量生成：plane_count = 1
+    # 批量生成：plane_count = 3
+    # 命名: Plane3_Ang{ang}_Ara{a}{b}{c}_Gno{gno}_Ben{ben}_Grid{grid}_Sin{sinp}.ply
+    # 例:   Plane3_Ang20_Ara244_Gno20_Ben50_Grid3_Sin20.ply
     # ========================
 
-    # --- 可调基准幅值，与单次示例保持一致 ---
+
     bend_amp_base = 0.2
     grid_amp_base = 0.05
     wave_amp_base = 0.05
 
-    # --- 批量参数 ---
-    noise_percent_list = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]  # 高斯噪声百分比
-    bend_percent_list = list(range(0, 101, 10))  # 弯曲度百分比 0..100
-    grid_n_list = list(range(2, 11))  # 2..10
-    wave_percent_list = list(range(0, 101, 10))  # 正弦起伏百分比 0..100
+    angle_list = [20, 40, 60, 80, 100, 120]              # 目标两两夹角(度)
+    area_ratio_list = [(2,4,4), (4,3,3), (6,2,2), (8,1,1)]          # 面积占比
+    noise_percent_list = [0, 20, 40, 60, 80, 100]                   # 高斯噪声 %
+    bend_percent_list  = [0, 20, 40, 60, 80, 100]                   # 弯曲度 %
+    grid_n_list        = [2, 4, 6, 8, 10]                           # Grid: 2..10
+    wave_percent_list  = [0, 20, 40, 60, 80, 100]                   # 正弦起伏 %
 
-    # --- 导出目录与清单 ---
-    batch_dir = os.path.join(DEFAULT_EXPORT_DIR, "batch_plane1")
-    os.makedirs(batch_dir, exist_ok=True)
-    manifest_path = os.path.join(batch_dir, "manifest_plane1.csv")
+    batch_dir3 = os.path.join(DEFAULT_EXPORT_DIR, "batch_plane3")
+    os.makedirs(batch_dir3, exist_ok=True)
+    manifest3_path = os.path.join(batch_dir3, "manifest_plane3.csv")
 
-    # 若清单不存在则写表头；存在则追加
-    write_header = not os.path.exists(manifest_path)
-    with open(manifest_path, "a", newline="", encoding="utf-8") as f_csv:
-        writer = csv.writer(f_csv)
-        if write_header:
-            writer.writerow([
+    write_header3 = not os.path.exists(manifest3_path)
+    with open(manifest3_path, "a", newline="", encoding="utf-8") as f3:
+        writer3 = csv.writer(f3)
+        if write_header3:
+            writer3.writerow([
                 "filename",
                 "plane_count",
-                "angle_deg",
+                "angle_deg",        # 目标两两夹角 (期望)
                 "area_ratio",
                 "noise_percent",
                 "bend_percent",
@@ -640,64 +599,94 @@ if __name__ == "__main__":
                 "bend_amp",
                 "grid_amp",
                 "wave_amp_abs",
-                "n_points"
+                "n_points",
+                # 三个真值平面 (ax+by+cz+d=0)
+                "A1","B1","C1","D1",
+                "A2","B2","C2","D2",
+                "A3","B3","C3","D3",
+                # 可选：实际对角(度)（在 >120° 时会偏离目标）
+                "ang_AB_real","ang_AC_real","ang_BC_real"
             ])
 
-        total_count = 0
-        skipped = 0
+        total_count3, skipped3 = 0, 0
 
-        for gno in noise_percent_list:
-            noise_level = gno / 100.0  # 与 Build 中 noise_level 语义一致(相对 1cm)
-            for ben in bend_percent_list:
-                bend_kappa = ben / 100.0
-                for grid_n in grid_n_list:
-                    for sinp in wave_percent_list:
-                        # 文件名(按你的格式)：Plane1_Ang0_Ara0_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply
-                        fname = f"Plane1_Ang0_Ara0_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply"
-                        fpath = os.path.join(batch_dir, fname)
+        for ang in angle_list:
+            for (a_part, b_part, c_part) in area_ratio_list:
+                ara_tag = f"{a_part}{b_part}{c_part}"  # 例: "244"
+                for gno in noise_percent_list:
+                    noise_level = gno / 100.0
+                    for ben in bend_percent_list:
+                        bend_kappa = ben / 100.0
+                        for grid_n in grid_n_list:
+                            for sinp in wave_percent_list:
+                                wave_amp = (sinp / 100.0) * wave_amp_base
+                                apply_wave = (sinp > 0)
 
-                        # 跳过已存在文件(便于断点续跑)
-                        if os.path.exists(fpath):
-                            skipped += 1
-                            continue
+                                fname = f"Plane3_Ang{ang}_Ara{ara_tag}_Gno{gno}_Ben{ben}_Grid{grid_n}_Sin{sinp}.ply"
+                                fpath = os.path.join(batch_dir3, fname)
 
-                        # 波形幅值：百分比×基准；0% 时关闭波形形变
-                        wave_amp = (sinp / 100.0) * wave_amp_base
-                        apply_wave = (sinp > 0)
+                                if os.path.exists(fpath):
+                                    skipped3 += 1
+                                    continue
 
-                        # 构建
-                        pts, lbl, meta = gen.Build(
-                            plane_count=1,
-                            step=CM,
-                            bend_kappa=bend_kappa,
-                            bend_amp=bend_amp_base,
-                            grid_amp=grid_amp_base,
-                            wave_amp=wave_amp,
-                            grid_n=grid_n,
-                            apply_grid_warp=True,
-                            apply_wave_warp=apply_wave,
-                            noise_level=noise_level
-                        )
+                                # 生成三平面
+                                pts, lbl, meta = gen.Build(
+                                    plane_count=3,
+                                    angle_deg=ang,                      # 新语义: 两两夹角(目标)
+                                    area_ratio=(a_part, b_part, c_part),
+                                    step=CM,
+                                    bend_kappa=bend_kappa,
+                                    bend_amp=bend_amp_base,
+                                    grid_amp=grid_amp_base,
+                                    wave_amp=wave_amp,
+                                    grid_n=grid_n,
+                                    apply_grid_warp=True,
+                                    apply_wave_warp=apply_wave,
+                                    noise_level=noise_level
+                                )
 
-                        # 保存
-                        SaveAsPLY(fpath, pts, lbl)
+                                SaveAsPLY(fpath, pts, lbl)
 
-                        # 写清单
-                        writer.writerow([
-                            fname,
-                            1,  # plane_count
-                            0,  # angle_deg 占位
-                            "0",  # area_ratio 占位
-                            gno,  # noise_percent
-                            ben,  # bend_percent
-                            grid_n,  # grid_n
-                            sinp,  # wave_percent
-                            bend_amp_base,
-                            grid_amp_base,
-                            wave_amp,  # 实际波形绝对幅值
-                            meta.get("n_points", pts.shape[0])
-                        ])
+                                # 读取三条真值平面方程
+                                if "gt_planes" in meta and len(meta["gt_planes"]) >= 3:
+                                    A1 = meta["gt_planes"][0]["a"]; B1 = meta["gt_planes"][0]["b"]; C1 = meta["gt_planes"][0]["c"]; D1 = meta["gt_planes"][0]["d"]
+                                    A2 = meta["gt_planes"][1]["a"]; B2 = meta["gt_planes"][1]["b"]; C2 = meta["gt_planes"][1]["c"]; D2 = meta["gt_planes"][1]["d"]
+                                    A3 = meta["gt_planes"][2]["a"]; B3 = meta["gt_planes"][2]["b"]; C3 = meta["gt_planes"][2]["c"]; D3 = meta["gt_planes"][2]["d"]
+                                else:
+                                    A1=B1=C1=D1=A2=B2=C2=D2=A3=B3=C3=D3 = (float("nan"))
 
-                        total_count += 1
+                                # 计算实际成对夹角（可选，便于核查 >120° 情况）
+                                def _ang(u, v):
+                                    x = float(np.clip(np.dot(Normalize(np.array([u["a"],u["b"],u["c"]])),
+                                                             Normalize(np.array([v["a"],v["b"],v["c"]]))) , -1.0, 1.0))
+                                    return float(np.degrees(np.arccos(x)))
+                                if "gt_planes" in meta and len(meta["gt_planes"]) >= 3:
+                                    ang_AB_real = _ang(meta["gt_planes"][0], meta["gt_planes"][1])
+                                    ang_AC_real = _ang(meta["gt_planes"][0], meta["gt_planes"][2])
+                                    ang_BC_real = _ang(meta["gt_planes"][1], meta["gt_planes"][2])
+                                else:
+                                    ang_AB_real = ang_AC_real = ang_BC_real = float("nan")
 
-        logger.info(f"[批量完成] 新生成: {total_count} 个文件, 跳过(已存在): {skipped} 个。清单: {manifest_path}")
+                                writer3.writerow([
+                                    fname,
+                                    3,                 # plane_count
+                                    ang,               # 目标两两夹角
+                                    f"{a_part}:{b_part}:{c_part}",
+                                    gno,               # noise_percent
+                                    ben,               # bend_percent
+                                    grid_n,            # grid_n
+                                    sinp,              # wave_percent
+                                    bend_amp_base,
+                                    grid_amp_base,
+                                    wave_amp,          # 绝对幅值(米)
+                                    meta.get("n_points", pts.shape[0]),
+                                    A1,B1,C1,D1,
+                                    A2,B2,C2,D2,
+                                    A3,B3,C3,D3,
+                                    ang_AB_real, ang_AC_real, ang_BC_real
+                                ])
+
+                                total_count3 += 1
+
+        logger.info(f"[批量完成: plane3] 新生成: {total_count3} 个文件, 跳过(已存在): {skipped3} 个。清单: {manifest3_path}")
+
