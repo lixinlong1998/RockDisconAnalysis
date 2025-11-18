@@ -61,7 +61,7 @@ def save_colored_cloud(out_path, pts, inlier_mask):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(pts)
         colors = np.zeros_like(pts)
-        colors[inlier_mask] = [1.0, 1.0, 1.0]  # inliers 白色
+        colors[inlier_mask] = [1.0, 0, 0]  # inliers 白色
         pcd.colors = o3d.utility.Vector3dVector(colors)
         o3d.io.write_point_cloud(out_path, pcd, write_ascii=True)
     else:
