@@ -180,28 +180,23 @@ def get_clusters(data, total_pointcloud, clusters_pointcloud, cluster_id_dict):
     return clusters
 
 
-def ransac_planarity_filter(clusters):
+def ransac_planarity_filter(clusters, ransac_distance=0.1):
     threshold_inliers_ratio = 0.4
     threshold_inliers_number = 50
-    test_scale_with_factor = []
     for cluster in clusters.clusters:
 
         # get the coordinates of point cloud
         points_coord = np.asarray([pt.coord for pt in cluster.rock_points.points])
 
         # get the scale of point cloud
-        starttime1 = time.perf_counter()
-        scale_with_factor, scale = estimate_adaptive_threshold(points_coord, scale_factor=0.05)
+        # starttime1 = time.perf_counter()
+        # diag_len = estimate_adaptive_threshold(points_coord, scale_factor=0.05)
         # print(f'[time cost]{time_cost_hms(time.perf_counter() - starttime1)} — estimate_adaptive_threshold.')
-
-        # test
-        test_scale_with_factor.append(scale_with_factor)
-        print(scale_with_factor)
 
         # 基于点云尺度，自适应调整RANSAC平面拟合的容差阈值distance_threshold
         starttime2 = time.perf_counter()
         inliers, outliers, inlier_mask, plane_params = fit_plane_ransac(points_coord,
-                                                                        distance_threshold=scale_with_factor)
+                                                                        distance_threshold=ransac_distance)
         # print(f'[time cost]{time_cost_hms(time.perf_counter() - starttime2)} — fit_plane_ransac.')
 
         # 检查内点率阈值和内点数量阈值
@@ -278,9 +273,7 @@ def estimate_adaptive_threshold(points, scale_factor=0.02):
     max_corner = np.max(points, axis=0)
     diag_len = np.linalg.norm(max_corner - min_corner)
 
-    tolerance = a * log(1 + b * diag_len)  # a,b为经验参数
-
-    return tolerance, diag_len
+    return diag_len
 
     # # 阈值与尺度成正比
     # distance_threshold = scale_area * scale_factor

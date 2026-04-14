@@ -49,10 +49,13 @@ facet_id=6对应的文件 🗒️ facet_contour_006.ply, 其内容为:
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # ################################################# input
-    path_data = r'D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\TSDK_Rockfall_1_P2_0.05m_facets_Kd_E0.2A20\TSDK_Rockfall_1_P2_0.05m_facets_converted.txt'
-    path_workspace = r"D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\TSDK_Rockfall_1_P2_0.05m_facets_Kd_E0.2A20\TSDK_Rockfall_1_P2_0.05m_facets_DiskModel"
-    project_name = 'TSDK_Rockfall_1_P2_0.05m_facets'
+    # path_data = r'D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\TSDK_Rockfall_1_P2_0.05m_facets_Kd_E0.2A20\TSDK_Rockfall_1_P2_0.05m_facets_converted.txt'
+    # path_workspace = r"D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\TSDK_Rockfall_1_P2_0.05m_facets_Kd_E0.2A20\TSDK_Rockfall_1_P2_0.05m_facets_DiskModel"
+    # project_name = 'TSDK_Rockfall_1_P2_0.05m_facets'
 
+    path_data = r'D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\Rock_GLS4_part1_localize_0.05m_facets_Kd_E0.2A25\Rock_GLS4_part1_localize_0.05m_facets_converted.txt'
+    path_workspace = r"D:\Research\20250313_RockFractureSeg\Code\qfacet_gpu\data\facet_export\Rock_GLS4_part1_localize_0.05m_facets_Kd_E0.2A25"
+    project_name = 'Rock_GLS4_part1_localize_0.05m'
     # ################################################# output
     if not path_workspace:
         path_workspace = os.path.join(os.path.dirname(path_data), 'Workspace')
@@ -117,7 +120,7 @@ if __name__ == '__main__':
         discontinuitys,
         neighbor_threshold=None,  # 或自定
         avg_spacing=0.05,  # 或自定
-        include_frac=0.3,  # 互含判定比例（工程阈值）
+        include_frac=0.1,  # 互含判定比例（工程阈值）
         close_tol_mult=1.5,  # 2d
         clique_shell=True,  # ✅ 启用“所有成员互为 INBR”的外壳规则
         min_clique_size=3,  # 至少三面成壳（你也可设为2）
@@ -145,7 +148,8 @@ if __name__ == '__main__':
     # # 查找并输出潜在的blocks（连通分量）
     # blocks = Segment.find_blocks(G)
     # print(f"Found {len(blocks)} potential blocks.")
-    # for block in blocks:
+    # for block_id, block in enumerate(blocks):
+    #     face_ids = sorted(list(block))
     #     print(block)
 
     '''
